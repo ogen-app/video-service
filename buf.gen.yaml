@@ -1,0 +1,14 @@
+# Generate the Go gRPC server/client stubs for proto/video/v1 into ./gen.
+# This repo is the canonical home of the video.v1 contract (CON-148).
+version: v1
+managed:
+  enabled: true
+  go_package_prefix:
+    default: github.com/ogen-app/video-service/gen
+plugins:
+  - plugin: go
+    out: gen
+    opt: paths=source_relative
+  - plugin: go-grpc
+    out: gen
+    opt: paths=source_relative

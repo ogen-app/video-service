@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -186,6 +187,13 @@ func (e *Engine) renderPoster(ctx context.Context, url string, durationMs int64)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		// Poster capture is best-effort; log at debug so the failure is
+		// diagnosable without noising up a normal probe.
+		slog.DebugContext(ctx, "poster render failed",
+			"component", "videoengine.poster",
+			"err", err,
+			"stderr", strings.TrimSpace(stderr.String()),
+		)
 		return nil
 	}
 	if b := stdout.Bytes(); len(b) > 0 && len(b) <= maxPosterBytes {

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -160,6 +161,32 @@ func TestProbe_InvalidContentIsTerminal(t *testing.T) {
 	}
 	if _, err := eng.Probe(context.Background(), bad, false); !errors.Is(err, ErrInvalidVideo) {
 		t.Fatalf("garbage input must be ErrInvalidVideo, got %v", err)
+	}
+}
+
+func TestFirstLineRedactsPresignedURL(t *testing.T) {
+	stderr := "https://bucket.s3.amazonaws.com/t/abc/key.mp4?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLE&X-Amz-Signature=deadbeefcafe: Invalid data found when processing input\nsecond line"
+	got := firstLine(stderr, nil)
+
+	// No credential material may survive.
+	for _, secret := range []string{"X-Amz-Signature", "deadbeefcafe", "X-Amz-Credential", "AKIAEXAMPLE"} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("credential %q leaked into %q", secret, got)
+		}
+	}
+	if !strings.Contains(got, "<redacted>") {
+		t.Errorf("expected a redaction marker, got %q", got)
+	}
+	// The diagnostic message is preserved, and only the first line is returned.
+	if !strings.Contains(got, "Invalid data found") {
+		t.Errorf("message dropped: %q", got)
+	}
+	if strings.Contains(got, "second line") {
+		t.Errorf("first-line behavior not preserved: %q", got)
+	}
+	// A message with no URL is returned unchanged.
+	if got := firstLine("moov atom not found", nil); got != "moov atom not found" {
+		t.Errorf("non-URL message must pass through, got %q", got)
 	}
 }
 

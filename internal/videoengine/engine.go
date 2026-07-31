@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -326,14 +327,27 @@ func firstLine(stderr string, runErr error) string {
 	s := strings.TrimSpace(stderr)
 	if s == "" {
 		if runErr != nil {
-			return runErr.Error()
+			return redactURLCredentials(runErr.Error())
 		}
 		return "unknown error"
 	}
 	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return s[:i]
+		s = s[:i]
 	}
-	return s
+	return redactURLCredentials(s)
+}
+
+// presignedQueryRe matches the query string of an http(s) URL — where presigned
+// credentials (signatures, access keys, tokens) live. ffprobe echoes the source
+// URL in its error output, so the query is stripped before that message is
+// wrapped into an error reaching classifyProbeErr or a gRPC response. The full
+// URL is only ever exposed via server-side logging, never to the client.
+var presignedQueryRe = regexp.MustCompile(`(https?://[^\s?]+)\?\S+`)
+
+// redactURLCredentials removes URL query strings from a diagnostic message,
+// leaving the rest of the text intact.
+func redactURLCredentials(s string) string {
+	return presignedQueryRe.ReplaceAllString(s, "${1}?<redacted>")
 }
 
 func parseSecondsToMs(s string) int64 {

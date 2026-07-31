@@ -1,6 +1,7 @@
 package videoengine
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -127,9 +128,12 @@ func TestProbeEndToEnd(t *testing.T) {
 	if len(res.PosterPNG) == 0 {
 		t.Error("expected a poster frame")
 	}
-	// PNG magic bytes.
-	if len(res.PosterPNG) >= 8 && string(res.PosterPNG[1:4]) != "PNG" {
-		t.Errorf("poster is not a PNG: % x", res.PosterPNG[:8])
+	// A valid poster must begin with the full 8-byte PNG signature. Compare
+	// unconditionally so a short or malformed payload fails rather than
+	// slipping past the check.
+	pngSignature := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}
+	if len(res.PosterPNG) < len(pngSignature) || !bytes.Equal(res.PosterPNG[:len(pngSignature)], pngSignature) {
+		t.Errorf("poster is not a PNG (len=%d): % x", len(res.PosterPNG), res.PosterPNG[:min(len(res.PosterPNG), len(pngSignature))])
 	}
 }
 

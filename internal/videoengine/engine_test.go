@@ -154,3 +154,29 @@ func TestProbe_InvalidContentIsTerminal(t *testing.T) {
 		t.Fatalf("garbage input must be ErrInvalidVideo, got %v", err)
 	}
 }
+
+func TestCappedBuffer(t *testing.T) {
+	c := &cappedBuffer{limit: 4}
+
+	// Under-limit write accumulates fully, no overflow.
+	if n, _ := c.Write([]byte("ab")); n != 2 || c.overflow || string(c.Bytes()) != "ab" {
+		t.Fatalf("under-limit: n=%d overflow=%v bytes=%q", n, c.overflow, c.Bytes())
+	}
+
+	// A write crossing the limit reports its full length (so the process isn't
+	// stopped) but only retains up to limit and flags overflow.
+	if n, _ := c.Write([]byte("cdef")); n != 4 {
+		t.Fatalf("Write must report full length, got %d", n)
+	}
+	if !c.overflow {
+		t.Fatal("expected overflow after crossing the limit")
+	}
+	if string(c.Bytes()) != "abcd" {
+		t.Fatalf("buffer must cap at limit, got %q", c.Bytes())
+	}
+
+	// Further data past the limit is discarded; length stays at limit.
+	if n, _ := c.Write([]byte("ghi")); n != 3 || len(c.Bytes()) != 4 {
+		t.Fatalf("past-limit write should discard: n=%d len=%d", n, len(c.Bytes()))
+	}
+}

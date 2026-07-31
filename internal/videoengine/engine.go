@@ -169,7 +169,10 @@ func (e *Engine) renderPoster(ctx context.Context, url string, durationMs int64)
 	if durationMs > 2000 {
 		seek = "1"
 	}
-	var stdout, stderr bytes.Buffer
+	var stderr bytes.Buffer
+	// Bound stdout during collection so a pathological ffmpeg frame can't
+	// balloon memory before the size check below.
+	stdout := &cappedBuffer{limit: maxPosterBytes}
 	cmd := exec.CommandContext(ctx, e.ffmpeg,
 		"-nostdin",
 		"-hide_banner",
@@ -184,7 +187,7 @@ func (e *Engine) renderPoster(ctx context.Context, url string, durationMs int64)
 		"-c:v", "png",
 		"pipe:1",
 	)
-	cmd.Stdout = &stdout
+	cmd.Stdout = stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		// Poster capture is best-effort; log at debug so the failure is
@@ -196,11 +199,42 @@ func (e *Engine) renderPoster(ctx context.Context, url string, durationMs int64)
 		)
 		return nil
 	}
+	if stdout.overflow {
+		// Frame exceeded the cap; discard it and keep a poster-less result.
+		return nil
+	}
 	if b := stdout.Bytes(); len(b) > 0 && len(b) <= maxPosterBytes {
 		return b
 	}
 	return nil
 }
+
+// cappedBuffer is an io.Writer that accumulates at most limit bytes and
+// discards the rest, recording that an overflow happened. It bounds memory
+// when collecting the stdout of an external process whose output size isn't
+// trusted. Write never errors, so the process runs to completion (its excess
+// output is dropped) instead of dying on a short write.
+type cappedBuffer struct {
+	limit    int
+	buf      bytes.Buffer
+	overflow bool
+}
+
+func (c *cappedBuffer) Write(p []byte) (int, error) {
+	if remaining := c.limit - c.buf.Len(); remaining > 0 {
+		if len(p) <= remaining {
+			c.buf.Write(p)
+		} else {
+			c.buf.Write(p[:remaining])
+			c.overflow = true
+		}
+	} else if len(p) > 0 {
+		c.overflow = true
+	}
+	return len(p), nil
+}
+
+func (c *cappedBuffer) Bytes() []byte { return c.buf.Bytes() }
 
 // ffprobeOutput is the subset of ffprobe -show_format/-show_streams JSON we use.
 type ffprobeOutput struct {

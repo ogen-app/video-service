@@ -149,7 +149,12 @@ func (e *Engine) ffprobeMeta(ctx context.Context, url string) (*ffprobeOutput, e
 	}
 	var out ffprobeOutput
 	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
-		return nil, fmt.Errorf("%w: ffprobe output not decodable: %v", ErrInvalidVideo, err)
+		// ffprobe exited 0 but its output isn't decodable — an anomaly in the
+		// tool's own output, not evidence of content corruption. Treat it as
+		// transient (plain error -> Internal) so a valid upload isn't wrongly
+		// rejected; terminal ErrInvalidVideo is reserved for recognized content
+		// markers from classifyProbeErr.
+		return nil, fmt.Errorf("videoengine: ffprobe output not decodable: %w", err)
 	}
 	return &out, nil
 }

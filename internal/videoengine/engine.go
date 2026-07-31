@@ -28,9 +28,13 @@ import (
 // else (network, timeout, missing binary) is transient → Internal.
 var ErrInvalidVideo = errors.New("videoengine: invalid or unreadable video")
 
-// maxPosterBytes caps the poster PNG read from ffmpeg's stdout, a backstop
-// against a pathological frame. A downscaled single frame is well under this.
-const maxPosterBytes = 16 << 20
+// maxPosterBytes caps the poster PNG embedded in ProbeResponse. It is kept
+// under gRPC's default 4 MiB receive-message limit so a client that hasn't
+// raised MaxCallRecvMsgSize can still receive the response — we don't rely on
+// a client-side override. An oversize frame is dropped (renderPoster returns
+// nil) and the metadata response is still sent without a poster. Downscaling to
+// <=1280px keeps a real single frame far under this.
+const maxPosterBytes = 3 << 20 // 3 MiB, safely below the 4 MiB gRPC default
 
 // Engine runs ffprobe/ffmpeg, bounded by a worker semaphore.
 type Engine struct {

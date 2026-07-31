@@ -304,9 +304,13 @@ func classifyProbeErr(stderr string, runErr error) error {
 			return fmt.Errorf("videoengine: ffprobe transient: %s", firstLine(stderr, runErr))
 		}
 	}
+	// Only unambiguous content-corruption markers are terminal. Excluded on
+	// purpose: "end of file" (a truncated transfer, not necessarily corrupt),
+	// "invalid argument" (an ffmpeg option / EINVAL, not a content signal), and
+	// "truncat" (also matches the recoverable "Truncating packet" warning).
 	invalid := []string{
 		"invalid data found", "moov atom not found", "could not find codec parameters",
-		"end of file", "unknown format", "header missing", "truncat", "invalid argument",
+		"unknown format", "header missing",
 	}
 	for _, m := range invalid {
 		if strings.Contains(s, m) {

@@ -66,6 +66,14 @@ func TestClassifyProbeErr(t *testing.T) {
 	if err := classifyProbeErr("some unrecognised ffprobe complaint", nil); errors.Is(err, ErrInvalidVideo) {
 		t.Errorf("unknown must default transient, got %v", err)
 	}
+	// Ambiguous markers must NOT be terminal: a truncated transfer, an ffmpeg
+	// option/EINVAL error, or a recoverable "Truncating packet" warning must
+	// degrade gracefully rather than reject a possibly-valid upload.
+	for _, msg := range []string{"End of file", "Invalid argument", "Truncating packet of size 100 to 40"} {
+		if err := classifyProbeErr(msg, nil); errors.Is(err, ErrInvalidVideo) {
+			t.Errorf("%q must be transient, got %v", msg, err)
+		}
+	}
 }
 
 func TestParseHelpers(t *testing.T) {

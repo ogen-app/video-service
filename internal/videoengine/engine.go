@@ -38,6 +38,11 @@ var ErrInvalidVideo = errors.New("videoengine: invalid or unreadable video")
 // <=1280px keeps a real single frame far under this.
 const maxPosterBytes = 3 << 20 // 3 MiB, safely below the 4 MiB gRPC default
 
+// maxProbeOutputBytes bounds ffprobe's stdout (metadata JSON) and stderr so a
+// pathological input can't balloon memory. Legitimate metadata is far smaller;
+// an overflow means the output is unusable and is treated as a transient error.
+const maxProbeOutputBytes = 4 << 20 // 4 MiB
+
 // Engine runs ffprobe/ffmpeg, bounded by a worker semaphore.
 type Engine struct {
 	ffprobe      string
@@ -132,7 +137,9 @@ func (e *Engine) Probe(ctx context.Context, sourceURL string, renderPoster bool)
 
 // ffprobeMeta runs ffprobe -show_format -show_streams and decodes the JSON.
 func (e *Engine) ffprobeMeta(ctx context.Context, url string) (*ffprobeOutput, error) {
-	var stdout, stderr bytes.Buffer
+	// Bound both streams so a pathological input can't balloon memory.
+	stdout := &cappedBuffer{limit: maxProbeOutputBytes}
+	stderr := &cappedBuffer{limit: maxProbeOutputBytes}
 	cmd := exec.CommandContext(ctx, e.ffprobe,
 		"-v", "error",
 		"-hide_banner",
@@ -141,13 +148,18 @@ func (e *Engine) ffprobeMeta(ctx context.Context, url string) (*ffprobeOutput, e
 		"-show_streams",
 		"-i", url,
 	)
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("videoengine: ffprobe: %w", ctx.Err())
 		}
 		return nil, classifyProbeErr(stderr.String(), err)
+	}
+	if stdout.overflow {
+		// Metadata past the cap can't be parsed; treat as transient (plain
+		// error -> Internal) rather than reject a possibly-valid upload.
+		return nil, fmt.Errorf("videoengine: ffprobe output exceeded %d bytes", maxProbeOutputBytes)
 	}
 	var out ffprobeOutput
 	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
@@ -235,7 +247,8 @@ func (c *cappedBuffer) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func (c *cappedBuffer) Bytes() []byte { return c.buf.Bytes() }
+func (c *cappedBuffer) Bytes() []byte  { return c.buf.Bytes() }
+func (c *cappedBuffer) String() string { return c.buf.String() }
 
 // ffprobeOutput is the subset of ffprobe -show_format/-show_streams JSON we use.
 type ffprobeOutput struct {

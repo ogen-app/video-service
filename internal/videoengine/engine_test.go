@@ -214,4 +214,9 @@ func TestCappedBuffer(t *testing.T) {
 	if n, _ := c.Write([]byte("ghi")); n != 3 || len(c.Bytes()) != 4 {
 		t.Fatalf("past-limit write should discard: n=%d len=%d", n, len(c.Bytes()))
 	}
+
+	// String mirrors Bytes.
+	if c.String() != string(c.Bytes()) {
+		t.Errorf("String %q != Bytes %q", c.String(), c.Bytes())
+	}
 }

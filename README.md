@@ -14,7 +14,7 @@ upload instead of letting it dead-end in Draft.
 
 `video.v1.VideoService` (see [`proto/video/v1/video.proto`](proto/video/v1/video.proto)):
 
-```
+```protobuf
 rpc Probe(ProbeRequest) returns (ProbeResponse)
 ```
 

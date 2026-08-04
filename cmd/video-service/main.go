@@ -18,6 +18,7 @@ import (
 	videov1 "github.com/ogen-app/video-service/gen/video/v1"
 	"github.com/ogen-app/video-service/internal/config"
 	"github.com/ogen-app/video-service/internal/logging"
+	"github.com/ogen-app/video-service/internal/runtimetune"
 	"github.com/ogen-app/video-service/internal/server"
 	"github.com/ogen-app/video-service/internal/videoengine"
 )
@@ -33,11 +34,16 @@ func main() {
 
 	logger := logging.New(cfg)
 
+	// Bound the heap to the container and return burst-freed memory to the OS so
+	// RSS tracks real usage instead of holding a high-water mark.
+	runtimetune.Apply(logger, cfg)
+
 	engine, err := videoengine.New(videoengine.Config{
-		FFprobePath:  cfg.FFprobePath,
-		FFmpegPath:   cfg.FFmpegPath,
-		Workers:      cfg.Workers,
-		ProbeTimeout: cfg.ProbeTimeout,
+		FFprobePath:    cfg.FFprobePath,
+		FFmpegPath:     cfg.FFmpegPath,
+		Workers:        cfg.Workers,
+		ProbeTimeout:   cfg.ProbeTimeout,
+		ScavengeOnIdle: cfg.ScavengeOnIdle,
 	})
 	if err != nil {
 		logger.Error("init engine", "component", "boot", "err", err)

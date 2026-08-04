@@ -27,6 +27,23 @@ type Config struct {
 	// resolve on PATH; override only for non-standard installs.
 	FFprobePath string `envconfig:"FFPROBE_PATH" default:"ffprobe"`
 	FFmpegPath  string `envconfig:"FFMPEG_PATH"  default:"ffmpeg"`
+	// GCPercent sets the GC target (Go's GOGC) via debug.SetGCPercent at boot. A
+	// lower value collects more often, trading CPU for a smaller heap high-water
+	// mark — worthwhile here since the service sits CPU-idle between bursts. <=0
+	// leaves the runtime default (100) in place.
+	GCPercent int `envconfig:"VIDEO_SERVICE_GC_PERCENT" default:"50"`
+	// MemoryLimitRatio sets Go's soft memory limit (GOMEMLIMIT) to this fraction
+	// of the container's cgroup memory limit, read at boot. It makes the GC lean
+	// harder as the heap nears the cap, keeping RSS down and guarding against OOM
+	// under a burst. Ignored when GOMEMLIMIT is set explicitly, when <=0, or when
+	// no finite cgroup limit is found (e.g. local dev). Values >1 are allowed but
+	// unusual — leave headroom for the ffmpeg/ffprobe child processes' own RSS.
+	MemoryLimitRatio float64 `envconfig:"VIDEO_SERVICE_MEMORY_LIMIT_RATIO" default:"0.9"`
+	// ScavengeOnIdle returns freed memory to the OS (debug.FreeOSMemory) once the
+	// worker pool drains to idle after a burst, so container RSS tracks real
+	// usage instead of holding a high-water mark. Runs off the request path;
+	// disable if the extra GC churn is unwanted.
+	ScavengeOnIdle bool `envconfig:"VIDEO_SERVICE_SCAVENGE_ON_IDLE" default:"true"`
 	// LogLevel is the minimum slog level: debug|info|warn|error. Unknown/empty
 	// falls back to info. Bare LOG_LEVEL (not prefixed) matches the Ogen API's
 	// knob so operators use identical settings across services (CON-107).

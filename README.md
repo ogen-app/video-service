@@ -50,8 +50,22 @@ Environment variables (no prefix, matching the Ogen API's style):
 | `VIDEO_SERVICE_PROBE_TIMEOUT` | `90s` | per-probe upper bound |
 | `FFPROBE_PATH` | `ffprobe` | ffprobe binary (name or path) |
 | `FFMPEG_PATH` | `ffmpeg` | ffmpeg binary (name or path) |
+| `VIDEO_SERVICE_GC_PERCENT` | `50` | GC target (GOGC); lower = smaller heap, more CPU. `<=0` keeps the runtime default |
+| `VIDEO_SERVICE_MEMORY_LIMIT_RATIO` | `0.9` | soft mem limit (GOMEMLIMIT) as a fraction of the cgroup limit; ignored if `GOMEMLIMIT` is set or no cgroup limit is found |
+| `VIDEO_SERVICE_SCAVENGE_ON_IDLE` | `true` | return freed memory to the OS once the worker pool drains after a burst |
 | `LOG_LEVEL` | `info` | `debug\|info\|warn\|error` |
 | `LOG_FORMAT` | `json` | `json` (prod) or `text` (local) |
+
+### Memory footprint
+
+The service holds no state across probes — every buffer is request-local and
+bounded (see `videoengine`). What container metrics show as a memory "leak" is
+usually the Go runtime and cgroup holding a **reclaimable** high-water mark
+after a burst: RSS steps up and stays flat rather than being freed. The three
+knobs above address that — `GOMEMLIMIT` (derived from the cgroup limit) caps the
+heap, `GOGC` collects more often, and the idle scavenge returns freed pages to
+the OS once the worker pool drains — so RSS tracks real usage. A genuine leak
+looks different: a rising staircase across successive bursts, not a plateau.
 
 ## Build & run
 

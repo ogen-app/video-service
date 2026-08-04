@@ -19,8 +19,10 @@ import (
 	"log/slog"
 	"os/exec"
 	"regexp"
+	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -49,14 +51,24 @@ type Engine struct {
 	ffmpeg       string
 	probeTimeout time.Duration
 	sem          chan struct{}
+
+	// scavengeOnIdle returns freed memory to the OS once the pool drains after a
+	// burst; active tracks in-flight probes so the drain-to-idle edge can be
+	// detected, and scavenging collapses overlapping scavenge triggers into one.
+	// scavengeFn is the actual reclaim (debug.FreeOSMemory), injectable for tests.
+	scavengeOnIdle bool
+	scavengeFn     func()
+	active         atomic.Int64
+	scavenging     atomic.Bool
 }
 
 // Config tunes the engine.
 type Config struct {
-	FFprobePath  string
-	FFmpegPath   string
-	Workers      int
-	ProbeTimeout time.Duration
+	FFprobePath    string
+	FFmpegPath     string
+	Workers        int
+	ProbeTimeout   time.Duration
+	ScavengeOnIdle bool
 }
 
 // New resolves the ffprobe/ffmpeg binaries and initialises the worker pool. It
@@ -80,10 +92,12 @@ func New(cfg Config) (*Engine, error) {
 		timeout = 90 * time.Second
 	}
 	return &Engine{
-		ffprobe:      ffprobe,
-		ffmpeg:       ffmpeg,
-		probeTimeout: timeout,
-		sem:          make(chan struct{}, workers),
+		ffprobe:        ffprobe,
+		ffmpeg:         ffmpeg,
+		probeTimeout:   timeout,
+		sem:            make(chan struct{}, workers),
+		scavengeOnIdle: cfg.ScavengeOnIdle,
+		scavengeFn:     debug.FreeOSMemory,
 	}, nil
 }
 
@@ -112,10 +126,11 @@ func (e *Engine) Probe(ctx context.Context, sourceURL string, renderPoster bool)
 
 	select {
 	case e.sem <- struct{}{}:
-		defer func() { <-e.sem }()
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+	e.active.Add(1)
+	defer e.releaseWorker()
 
 	ctx, cancel := context.WithTimeout(ctx, e.probeTimeout)
 	defer cancel()
@@ -133,6 +148,36 @@ func (e *Engine) Probe(ctx context.Context, sourceURL string, renderPoster bool)
 		res.PosterPNG = e.renderPoster(ctx, sourceURL, res.DurationMs)
 	}
 	return res, nil
+}
+
+// releaseWorker frees the worker slot and, when this was the last in-flight
+// probe, kicks off an idle scavenge so the burst's freed memory returns to the
+// OS instead of lingering as container RSS. Only the probe that drains the pool
+// to zero triggers it, so a steady stream of work scavenges at most once per
+// quiet gap rather than after every probe.
+func (e *Engine) releaseWorker() {
+	idle := e.active.Add(-1) == 0
+	<-e.sem
+	if idle && e.scavengeOnIdle {
+		e.scavenge()
+	}
+}
+
+// scavenge returns freed memory to the OS off the request path. debug.
+// FreeOSMemory runs a stop-the-world GC, so it must not block a probe; it also
+// must not pile up if bursts drain to idle repeatedly, hence the single-flight
+// guard. If a probe arrives mid-scavenge the extra GC is harmless — just a
+// little CPU, of which this service has ample between bursts.
+func (e *Engine) scavenge() {
+	if !e.scavenging.CompareAndSwap(false, true) {
+		return // a scavenge is already running
+	}
+	go func() {
+		defer e.scavenging.Store(false)
+		e.scavengeFn()
+		slog.Debug("returned freed memory to OS after idle",
+			"component", "videoengine.scavenge")
+	}()
 }
 
 // ffprobeMeta runs ffprobe -show_format -show_streams and decodes the JSON.

@@ -3,6 +3,7 @@ package runtimetune
 import (
 	"io"
 	"log/slog"
+	"math"
 	"runtime/debug"
 	"testing"
 	"testing/fstest"
@@ -116,6 +117,35 @@ func TestApply_RespectsExplicitGOMEMLIMIT(t *testing.T) {
 
 	if got := debug.SetMemoryLimit(-1); got != orig {
 		t.Errorf("limit changed to %d despite explicit GOMEMLIMIT (was %d)", got, orig)
+	}
+}
+
+func TestApply_RejectsInvalidRatios(t *testing.T) {
+	// NaN/±Inf and finite ratios whose product overflows int64 must not reach
+	// debug.SetMemoryLimit — the int64 conversion is implementation-defined for
+	// them. A 1 GiB cgroup limit × 1e18 is finite but far past int64's ceiling.
+	orig := debug.SetMemoryLimit(-1)
+	t.Cleanup(func() { debug.SetMemoryLimit(orig) })
+
+	root := fstest.MapFS{cgroupV2Max: {Data: []byte("1073741824")}} // 1 GiB
+	noEnv := func(string) (string, bool) { return "", false }
+
+	for _, tt := range []struct {
+		name  string
+		ratio float64
+	}{
+		{"NaN", math.NaN()},
+		{"positive infinity", math.Inf(1)},
+		{"overflowing finite", 1e18},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			debug.SetMemoryLimit(orig) // known baseline to assert against
+			cfg := &config.Config{MemoryLimitRatio: tt.ratio}
+			apply(discardLogger(), cfg, root, noEnv)
+			if got := debug.SetMemoryLimit(-1); got != orig {
+				t.Errorf("limit changed to %d for ratio %v; want unchanged %d", got, tt.ratio, orig)
+			}
+		})
 	}
 }
 

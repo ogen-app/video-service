@@ -9,6 +9,7 @@ package runtimetune
 import (
 	"io/fs"
 	"log/slog"
+	"math"
 	"os"
 	"runtime/debug"
 	"strconv"
@@ -62,7 +63,16 @@ func apply(logger *slog.Logger, cfg *config.Config, root fs.FS, lookupEnv func(s
 			"component", "runtimetune")
 		return
 	}
-	soft := int64(float64(limit) * cfg.MemoryLimitRatio)
+	// Validate before the int64 conversion: NaN/±Inf and any product outside the
+	// int64 range convert to an implementation-defined value. (The <=0 guard
+	// above rejects non-positive ratios but not NaN, since NaN <= 0 is false.)
+	product := float64(limit) * cfg.MemoryLimitRatio
+	if math.IsNaN(product) || product >= float64(math.MaxInt64) || product < float64(math.MinInt64) {
+		logger.Warn("invalid or out-of-range memory limit ratio; leaving GOMEMLIMIT unset",
+			"component", "runtimetune", "ratio", cfg.MemoryLimitRatio)
+		return
+	}
+	soft := int64(product)
 	if soft <= 0 {
 		return
 	}

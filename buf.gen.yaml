@@ -1,5 +1,9 @@
-# Generate the Go gRPC server/client stubs for proto/video/v1 into ./gen.
-# This repo is the canonical home of the video.v1 contract (CON-148).
+# Generate the Go gRPC server stubs for video.v1 into ./gen.
+#
+# The video.v1 contract now lives in the shared buf.build/ogen-app/proto module
+# (CON-220), not in this repo. `make proto` generates from a pinned version of
+# that module; managed mode keeps the go_package_prefix below, so the generated
+# import paths (github.com/ogen-app/video-service/gen/...) are unchanged.
 version: v1
 managed:
   enabled: true

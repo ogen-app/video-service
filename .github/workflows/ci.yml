@@ -58,12 +58,11 @@ jobs:
         with:
           persist-credentials: false
       - uses: bufbuild/buf-setup-action@v1
-      - run: buf lint proto
 
-      # Verify the committed stubs under gen/ are in sync with the .proto
-      # sources — a drifted checkout means someone edited the proto without
-      # regenerating. Plugin versions are pinned to those in the generated
-      # headers so regeneration is byte-identical.
+      # Verify the committed stubs under gen/ are in sync with the pinned
+      # buf.build/ogen-app/proto contract (CON-220) — a drifted checkout means
+      # someone bumped the contract without regenerating. Plugin versions are
+      # pinned to those in the generated headers so regeneration is byte-identical.
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -75,9 +74,9 @@ jobs:
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - name: Verify generated code is up to date
         run: |
-          buf generate proto
+          make proto
           if [ -n "$(git status --porcelain -- gen/)" ]; then
-            echo "::error::gen/ is out of date — run 'buf generate proto' and commit the result"
+            echo "::error::gen/ is out of date — run 'make proto' and commit the result"
             git status --porcelain -- gen/
             git diff -- gen/
             exit 1
